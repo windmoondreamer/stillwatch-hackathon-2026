@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StillWatch · 작업자 음성 확인</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar"><a class="brand" href="/"><span class="brand-icon">S</span> StillWatch <span class="brand-caption">작업자 음성 확인</span></a><span class="prototype">LOCAL PROTOTYPE</span></header>
+  <main>
+    <div class="intro"><div><p class="eyebrow">움직임을 보고, 응답을 듣습니다</p><h1>멈춤 다음의 확인.</h1><p class="subtitle">움직임 정지 → 음성 확인 → 버튼 응답 또는 담당자 확인 요청</p></div><div class="api-status" id="api-status">연결 설정 확인 중</div></div>
+    <div class="layout">
+      <aside class="card setup"><div class="section-title"><h2>작업 등록</h2><span class="small-label">한 공간 · 한 작업자</span></div>
+        <form id="setup-form">
+          <label for="room">작업 공간</label><input id="room" value="연구실 A" maxlength="80" required>
+          <label for="task">작업 내용</label><input id="task" value="야간 장비 점검" maxlength="160" required>
+          <label for="mode">실행 모드</label><select id="mode"><option value="test">동작 시험 · AI 연결 없음</option><option value="live">실제 AI 음성 대화</option></select>
+          <label for="sensor-input">움직임 입력</label><select id="sensor-input"><option value="demo">화면의 시험 버튼</option><option value="device">ESP32 · 직접 연결</option><option value="mqtt">ESPectre · MQTT 연결</option></select>
+          <div class="time-fields"><div><label for="still-seconds">정지 관찰 시간</label><div class="unit-input"><input id="still-seconds" type="number" value="10" min="2" max="120" required><span>초</span></div></div><div><label for="response-seconds">응답 제한시간</label><div class="unit-input"><input id="response-seconds" type="number" value="25" min="10" max="120" required><span>초</span></div></div></div>
+          <label class="check-label"><input id="baseline-enabled" type="checkbox" checked> 입장 후 60초 정지 기준선 관찰</label>
+          <p class="field-note">데모용 시간입니다. 현장에 적용할 시간은 별도 검증이 필요합니다.</p>
+          <button type="submit" class="primary" id="start">입장 등록 · 작업 시작</button>
+        </form>
+        <button class="text-button" id="refresh-config">연결 설정 새로고침</button>
+        <details><summary>실제 AI 음성 연결 설정</summary><form id="key-form"><label for="api-key">OpenAI API 키</label><input id="api-key" type="password" autocomplete="off" placeholder="sk-…" required><button class="primary" type="submit">이 PC에 키 저장</button></form><p>키는 로컬 서버의 <code>.env</code>에 저장됩니다. 브라우저에는 키를 돌려주지 않습니다.</p><p>실제 음성 모드에서 작업을 시작하면 마이크 권한을 요청합니다. 음성은 확인 요청 중에만 전송합니다.</p></details>
+        <details id="device-setup"><summary>ESP32 연결 · COM4</summary><p id="device-message">Wi-Fi 설정 대기</p><form id="wifi-form"><label for="wifi-ssid">2.4 GHz Wi-Fi 이름</label><input id="wifi-ssid" autocomplete="off" maxlength="32" required><label for="wifi-password">Wi-Fi 비밀번호</label><input id="wifi-password" type="password" autocomplete="off" maxlength="63"><button class="primary" id="wifi-submit" type="submit">USB로 Wi-Fi 설정</button></form><p class="field-note">Wi-Fi 정보는 USB로 보드에 전달하며 PC 파일에 저장하지 않습니다.</p><button class="text-button" id="usb-status">USB 상태 확인</button><label for="device-ip">ESP32 IP 주소</label><input id="device-ip" placeholder="192.168.0.100" inputmode="decimal"><button class="text-button" id="device-connect">센서 연결</button><p id="device-score" class="field-note">움직임 점수 대기</p></details>
+        <details><summary>MQTT · 버튼·LED·부저 연결</summary><form id="mqtt-form"><label for="mqtt-url">로컬 브로커 주소</label><input id="mqtt-url" value="mqtt://127.0.0.1:1883" required><label for="mqtt-device">ESPectre 장치 ID</label><input id="mqtt-device" placeholder="16자리 장치 ID" maxlength="16" required><label for="mqtt-controller">Tasmota 토픽 이름</label><input id="mqtt-controller" value="stillwatch_ctrl" required><button class="primary" type="submit">MQTT 연결</button></form><p id="mqtt-status">브로커 연결 대기</p><p class="field-note">브로커와 Tasmota 장치는 별도 준비가 필요합니다. 출력 확인 실패는 화면에 표시됩니다.</p></details>
+      </aside>
+      <section class="workspace">
+        <article class="card monitor"><div class="section-title"><h2>작업 상태</h2><span id="mode-badge" class="badge">작업 대기</span></div>
+          <div class="state-display"><span class="state-orb" id="state-orb"><span></span></span><div><p class="state-kicker" id="state-kicker">READY</p><h3 id="state-title">작업을 등록해주세요</h3><p id="state-description">정지 감지 후 응답 확인을 시작합니다.</p></div><div class="countdown" id="countdown" hidden><strong id="seconds">25</strong><span>남은 초</span></div></div>
+          <div class="signal-row"><span id="sensor-status">센서 시험 입력 대기</span><span id="voice-status">마이크 꺼짐</span></div>
+          <div class="metrics"><div><span>등록 인원</span><strong id="headcount">0명</strong></div><div><span>현재 정지 기준</span><strong id="threshold">10초</strong></div><div><span>정지 관찰</span><strong id="still-duration">—</strong></div></div>
+          <p class="baseline-status" id="baseline-status">입장 후 기준선을 관찰합니다.</p>
+          <div class="progress-track"><div id="progress-fill"></div></div>
+          <div class="actions"><button class="primary" id="confirm" disabled>괜찮습니다 · 응답 버튼</button><button id="entry" disabled>입장 +1</button><button id="exit" disabled>퇴장 −1</button><button id="end" disabled>작업 종료</button></div>
+          <p class="field-note">음성 응답은 상황을 기록합니다. 경보 해제는 응답 버튼 또는 담당자 확인으로 처리합니다.</p>
+        </article>
+        <article class="card"><div class="section-title"><h2>움직임 관찰 · 최근 60초</h2><span class="small-label" id="chart-label">시험 점수는 예시 값입니다</span></div><canvas id="motion-chart" role="img" aria-label="최근 60초 움직임 점수와 상태 그래프"></canvas><div class="chart-legend"><span><i class="dot moving"></i>움직임</span><span><i class="dot still"></i>정지</span><span><i class="dot unknown"></i>신호 없음</span></div></article>
+        <div class="two-column">
+          <article class="card conversation"><div class="section-title"><h2>음성 확인</h2><span class="small-label" id="conversation-label">대화 기록</span></div><div id="conversation" aria-live="polite"><div class="empty"><span class="empty-symbol">◌</span><p>움직임이 멈추면<br>응답 확인이 시작됩니다.</p></div></div><audio id="remote-audio" autoplay></audio><button id="play-audio" hidden>음성 재생 허용</button></article>
+          <article class="card incident"><div class="section-title"><h2>담당자 화면</h2><span class="small-label">이 브라우저에 표시</span></div><div id="notice" aria-live="polite"><div class="empty"><span class="empty-symbol">↗</span><p>도움 요청 또는 제한시간 종료 시<br>확인 요청을 표시합니다.</p></div></div><button id="manager-confirm" class="primary" hidden>담당자 확인 · 감시 재개</button><p class="field-note">외부 문자·전화·119 신고는 연결되어 있지 않습니다.</p></article>
+        </div>
+        <article class="card test-panel"><div class="section-title"><h2>시나리오 시험</h2><span class="small-label">ESP32 없이 흐름 확인</span></div><div class="test-actions"><button id="simulate-still" disabled>움직임 정지</button><button id="simulate-motion" disabled>움직임 재개</button><button id="simulate-disconnect" disabled>센서 연결 끊김</button></div><div class="test-response" id="test-response"><span>시험 응답 입력</span><button data-response="responded" disabled>“가만히 작업 중이에요”</button><button data-response="unclear" disabled>“네?”</button><button data-response="help_requested" class="danger-outline" disabled>“도와주세요”</button></div><p class="field-note" id="test-note">시험 응답은 미리 지정된 입력이며 실제 AI가 분석한 결과가 아닙니다.</p></article>
+        <article class="card"><div class="section-title"><h2>확인 요청 이력</h2><span class="small-label">처리 후에도 보관</span></div><div id="incident-history"><p class="field-note">아직 확인 요청이 없습니다.</p></div></article>
+        <article class="card timeline"><div class="section-title"><h2>사건 기록</h2><button id="download" class="text-button">기록 내려받기</button></div><ol id="timeline"><li class="empty-log">작업 등록을 기다리고 있습니다.</li></ol></article>
+      </section>
+    </div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <footer>StillWatch · 움직임 감지와 음성 확인을 연결하는 시제품</footer>
+  </main><script type="module" src="/app.js"></script>
+</body></html>

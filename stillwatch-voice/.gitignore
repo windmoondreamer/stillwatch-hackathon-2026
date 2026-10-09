@@ -1,0 +1,9 @@
+.env
+.mobile-token
+data/
+node_modules/
+test-artifacts/
+hardware-tools/
+hardware/*.bin
+hardware/release-*.json
+hardware/device.json

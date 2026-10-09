@@ -1,0 +1,16 @@
+{
+  "name": "stillwatch-voice",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "mqtt": "^5.16.0",
+    "qrcode": "^1.5.4"
+  }
+}

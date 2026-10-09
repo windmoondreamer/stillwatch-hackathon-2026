@@ -1,0 +1,80 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Monitor } from '../engine.mjs';
+import { generateReport } from '../report.mjs';
+import { Journal, readJournal } from '../journal.mjs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+function create(options = {}) {
+  let time = 100000;
+  const monitor = new Monitor({ now: () => time });
+  monitor.start({ room: '시험 공간', task: '점검', mode: 'test', stillSeconds: 30, responseSeconds: 10, ...options });
+  return { monitor, advance(ms) { for (let i = 0; i < ms; i += 200) { time += Math.min(200, ms - i); monitor.tick(); } } };
+}
+test('60 seconds of valid observations adapt threshold and entry changes restart baseline', () => {
+  const { monitor, advance } = create({ baselineEnabled: true });
+  monitor.motion(false, 'demo'); advance(18000); monitor.motion(true, 'demo'); advance(42000);
+  assert.equal(monitor.baseline.status, 'complete');
+  assert.equal(monitor.config.stillSeconds, 27);
+  assert.equal(monitor.baseline.longestIdleMs, 18000);
+  monitor.presence('entry');
+  assert.equal(monitor.headcount, 2);
+  assert.equal(monitor.baseline.status, 'collecting');
+  assert.equal(monitor.baseline.observedMs, 0);
+});
+test('no-signal time is excluded from baseline and no occupancy is inferred from motion', () => {
+  const { monitor, advance } = create({ baselineEnabled: true });
+  advance(10000); monitor.disconnect(); advance(70000);
+  assert.equal(monitor.baseline.observedMs, 10000);
+  assert.equal(monitor.snapshot().phase, 'SENSOR_LOST');
+  monitor.presence('exit'); monitor.presence('exit');
+  assert.equal(monitor.headcount, 0);
+  monitor.motion(true, 'demo'); advance(200); monitor.motion(true, 'demo'); advance(200); monitor.motion(true, 'demo');
+  assert.equal(monitor.state, 'EMPTY');
+  assert.equal(monitor.logs.filter(item => item.type === 'warning').length, 1);
+  monitor.motion(false, 'demo'); advance(60000);
+  assert.equal(monitor.incidents.length, 0);
+});
+test('incident facts and transcripts survive resolution, new jobs and process restart', async t => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), 'stillwatch-journal-'));
+  t.after(() => rm(temp, { recursive: true, force: true }));
+  const { monitor, advance } = create({ stillSeconds: 2 });
+  monitor.motion(false, 'demo'); advance(2000);
+  monitor.transcript(monitor.incident.id, 'worker', '도와주세요');
+  monitor.response(monitor.incident.id, 'help_requested', '도와주세요');
+  monitor.confirm('manager'); monitor.end();
+  monitor.start({ room: '새 작업', mode: 'test', stillSeconds: 10, responseSeconds: 10 });
+  const journal = new Journal(path.join(temp, 'events.json'));
+  journal.save(monitor.snapshot()); await journal.chain;
+  const restored = new Monitor({ history: await readJournal(journal.file) });
+  assert.equal(restored.state, 'IDLE');
+  assert.equal(restored.incidents.length, 1);
+  assert.equal(restored.incidents[0].room, '시험 공간');
+  assert.equal(restored.incidents[0].transcripts[0].text, '도와주세요');
+  assert.equal(restored.incidents[0].escalationReason, 'help_requested');
+});
+test('AI report preserves exact facts or falls back when facts change or API fails', async () => {
+  const { monitor, advance } = create({ stillSeconds: 2 });
+  monitor.motion(false, 'demo'); advance(12000);
+  const incident = monitor.incident;
+  const valid = { summary_ko: '현장 확인 요청입니다.', report_119_ko: '현장 정보 확인이 필요합니다.', fields_echo: incident.report.fields_echo };
+  let request;
+  const fetchImpl = async (url, options) => { request = JSON.parse(options.body); return new Response(JSON.stringify({ output: [{ content: [{ type: 'output_text', text: JSON.stringify(valid) }] }] })); };
+  const report = await generateReport(incident, { key: 'placeholder', fetchImpl });
+  assert.equal(report.source, 'ai');
+  assert.equal(request.text.format.strict, true);
+  valid.fields_echo = { ...valid.fields_echo, headcount: 20 };
+  assert.equal((await generateReport(incident, { key: 'placeholder', fetchImpl })).source, 'template');
+  assert.equal((await generateReport(incident, { key: 'placeholder', fetchImpl: async () => { throw new Error('offline'); } })).status, 'unavailable');
+});
+test('restart keeps an outstanding event as interrupted and does not silently resume monitoring', () => {
+  const { monitor, advance } = create({ stillSeconds: 2 });
+  monitor.motion(false, 'demo'); advance(2000);
+  const restored = new Monitor({ history: structuredClone(monitor.snapshot()) });
+  assert.equal(restored.state, 'IDLE');
+  assert.equal(restored.incident, null);
+  assert.equal(restored.incidents[0].result, 'interrupted');
+  assert.ok(restored.incidents[0].interruptedAt);
+  assert.equal(restored.incidents[0].voiceStatus, 'closed');
+});

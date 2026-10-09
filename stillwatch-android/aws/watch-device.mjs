@@ -1,0 +1,16 @@
+import fs from 'node:fs';
+import mqtt from '../../stillwatch-voice/node_modules/mqtt/build/mqtt.js';
+const privateDir=new URL('../.private/',import.meta.url);
+const config=JSON.parse(fs.readFileSync(new URL('deployment.json',privateDir)));
+const secret=JSON.parse(fs.readFileSync(new URL('device-secret.json',privateDir)));
+const prefix='espectre/v1/devices/'+secret.nativeDeviceId;
+const client=mqtt.connect('mqtts://'+config.nativeEndpoint+':443',{username:secret.username,password:secret.password,clientId:'stillwatch-observer-'+Date.now(),reconnectPeriod:0,connectTimeout:15000});
+const latest={};let count=0;
+client.on('connect',()=>{console.log('Observer connected; ESP32 publishes independently.');client.subscribe(prefix+'/#');
+ client.publish(prefix+'/commands/request',JSON.stringify({command_id:'diag-'+Date.now(),command:'read_diagnostics',fields:['mqtt','csi_callback_pps','csi_accepted_pps','generator_pps']}));
+ client.publish(prefix+'/commands/request',JSON.stringify({command_id:'ping-'+Date.now(),command:'update_sensing',traffic_generator_mode:'ping'}));
+});
+client.on('message',(topic,bytes,packet)=>{try{const kind=topic.slice(prefix.length+1),data=JSON.parse(bytes);latest[kind]={data,receivedAt:new Date().toISOString(),retained:packet.retain};fs.writeFileSync(new URL('live-sensor.json',privateDir),JSON.stringify(latest,null,2));
+ if(['health','sensing','commands/result'].includes(kind)||kind==='motion'&&count++<5)console.log(kind,JSON.stringify(data));}catch{}});
+client.on('error',error=>console.log('Observer error:',error.code||error.name));
+setTimeout(()=>client.end(true),90000);

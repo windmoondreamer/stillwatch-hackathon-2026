@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.StillWatch" parent="Theme.StillWatch.Base">
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>
